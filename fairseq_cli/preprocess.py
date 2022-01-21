@@ -19,7 +19,6 @@ from fairseq import options, tasks, utils
 from fairseq.binarizer import Binarizer
 from fairseq.data import indexed_dataset
 
-
 logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
@@ -39,7 +38,7 @@ def main(args):
             filename=os.path.join(args.destdir, "preprocess.log"),
         )
     )
-    logger.info(args)
+    # logger.info(args)
 
     task = tasks.get_task(args.task)
 
@@ -118,7 +117,7 @@ def main(args):
         tgt_dict.save(dict_path(args.target_lang))
 
     def make_binary_dataset(vocab, input_prefix, output_prefix, lang, num_workers):
-        logger.info("[{}] Dictionary: {} types".format(lang, len(vocab)))
+        # logger.info("[{}] Dictionary: {} types".format(lang, len(vocab)))
         n_seq_tok = [0, 0]
         replaced = Counter()
 

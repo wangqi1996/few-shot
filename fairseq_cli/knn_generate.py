@@ -9,25 +9,27 @@ Translate pre-processed data with a trained model.
 
 import ast
 import logging
-import math
 import os
 import sys
 from itertools import chain
 
+import math
 import numpy as np
 import torch
-from fairseq import checkpoint_utils, options, scoring, tasks, utils
+
+from fairseq import checkpoint_utils, options, scoring, tasks, utils, quantization_utils
 from fairseq.logging import progress_bar
 from fairseq.logging.meters import StopwatchMeter, TimeMeter
+from fairseq.trainer import Trainer
 
 
 def main(args):
     assert args.path is not None, "--path required for generation!"
     assert (
-        not args.sampling or args.nbest == args.beam
+            not args.sampling or args.nbest == args.beam
     ), "--sampling requires --nbest to be equal to --beam"
     assert (
-        args.replace_unk is None or args.dataset_impl == "raw"
+            args.replace_unk is None or args.dataset_impl == "raw"
     ), "--replace-unk requires a raw text dataset (--dataset-impl=raw)"
 
     if args.results_path is not None:
@@ -61,7 +63,7 @@ def _main(args, output_file):
 
     if args.max_tokens is None and args.batch_size is None:
         args.max_tokens = 12000
-    logger.info(args)
+    # logger.info(args)
 
     # Fix seed for stochastic decoding
     if args.seed is not None and not args.no_seed_provided:
@@ -72,7 +74,7 @@ def _main(args, output_file):
 
     # Load dataset splits
     task = tasks.setup_task(args)
-    task.load_dataset(args.gen_subset)
+    task.load_dataset(args.gen_subset, generate=True)
 
     # Set dictionaries
     try:
@@ -171,6 +173,22 @@ def _main(args, output_file):
 
     scorer = scoring.build_scorer(args, tgt_dict)
 
+    online_training = getattr(args, "online_training", False)
+    update_times = getattr(args, "online_update_freq", 1)
+
+    if online_training:
+        if args.quantization_config_path is not None:
+            quantizer = quantization_utils.Quantizer(
+                config_path=args.quantization_config_path,
+                max_epoch=args.max_epoch,
+                max_update=args.max_update,
+            )
+        else:
+            quantizer = None
+        criterion = task.build_criterion(args)
+        trainer = Trainer(args, task, models[0], criterion, quantizer)
+        optimizer = trainer.optimizer
+
     num_sentences = 0
     has_target = True
     wps_meter = TimeMeter()
@@ -197,6 +215,15 @@ def _main(args, output_file):
         )
         num_generated_tokens = sum(len(h[0]["tokens"]) for h in hypos)
         gen_timer.stop(num_generated_tokens)
+
+        # online update model
+        if online_training:
+            models[0].train()
+            for _ in range(update_times):
+                task.train_step(sample, models[0], criterion, optimizer, trainer.get_num_updates())
+                with torch.autograd.profiler.record_function("optimizer"):
+                    optimizer.step()
+            models[0].eval()
 
         for i, sample_id in enumerate(sample["id"].tolist()):
             has_target = sample["target"] is not None
@@ -278,8 +305,8 @@ def _main(args, output_file):
                                     lambda x: "{:.4f}".format(x),
                                     # convert from base e to base 2
                                     hypo["positional_scores"]
-                                    .div_(math.log(2))
-                                    .tolist(),
+                                        .div_(math.log(2))
+                                        .tolist(),
                                 )
                             ),
                         ),
@@ -374,7 +401,7 @@ def _main(args, output_file):
 
 
 def cli_main():
-    parser = options.get_generation_parser()
+    parser = options.get_knn_generation_parser()
     args = options.parse_args_and_arch(parser)
     main(args)
 

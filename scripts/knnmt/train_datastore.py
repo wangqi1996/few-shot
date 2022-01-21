@@ -1,159 +1,101 @@
-
-import logging
+import argparse
 import os
-import sys
+import time
 
-import torch
+import faiss
+import numpy as np
 
-from fairseq import checkpoint_utils, distributed_utils, options, utils
-from fairseq.logging import progress_bar
+# the implementation refers to knnlm
 
-logging.basicConfig(
-    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-    level=os.environ.get("LOGLEVEL", "INFO").upper(),
-    stream=sys.stdout,
-)
-logger = logging.getLogger("fairseq_cli.validate")
+parser = argparse.ArgumentParser()
+parser.add_argument('--dstore-mmap', type=str, help='memmap where keys and vals are stored')
+parser.add_argument('--dstore-size', type=int, help='number of items saved in the datastore memmap')
+parser.add_argument('--dimension', type=int, default=1024, help='Size of each key')
+parser.add_argument('--dstore-fp16', default=False, action='store_true')
+parser.add_argument('--seed', type=int, default=1,
+                    help='random seed for sampling the subset of vectors to train the cache')
+parser.add_argument('--ncentroids', type=int, default=4096, help='number of centroids faiss should learn')
+parser.add_argument('--code-size', type=int, default=64, help='size of quantized vectors')
+parser.add_argument('--probe', type=int, default=32, help='number of clusters to query')
+parser.add_argument('--faiss-index', type=str, help='file to write the faiss index')
+parser.add_argument('--num_keys_to_add_at_a_time', default=500000, type=int,
+                    help='can only load a certain amount of data to memory at a time.')
+parser.add_argument('--starting-point', type=int, default=0, help='index to start adding keys at')
+parser.add_argument('--load-multiple-files', default=False, action='store_true')
+parser.add_argument('--multiple-key-files', type=str, default=None)
+parser.add_argument('--multiple-val-files', type=str, default=None)
+parser.add_argument('--multiple-files-size', type=str, default=None)
+parser.add_argument('--concat-file-path', type=str, default=None)
 
+args = parser.parse_args()
 
-def main(args, override_args=None):
-    utils.import_user_module(args)
+print(args)
 
-    assert (
-            args.max_tokens is not None or args.batch_size is not None
-    ), "Must specify batch size either with --max-tokens or --batch-size"
+res = faiss.StandardGpuResources()
 
-    use_fp16 = args.fp16
-    use_cuda = torch.cuda.is_available() and not args.cpu
+if args.dstore_fp16:
+    print('load dstore fp16', args.dstore_size, args.dimension)
+    keys = np.memmap(args.dstore_mmap + '/keys.npy', dtype=np.float16, mode='r',
+                         shape=(args.dstore_size, args.dimension))
+    vals = np.memmap(args.dstore_mmap + '/vals.npy', dtype=np.int, mode='r', shape=(args.dstore_size, 1))
+else:
+    keys = np.memmap(args.dstore_mmap + '/keys.npy', dtype=np.float32, mode='r',
+                     shape=(args.dstore_size, args.dimension))
+    vals = np.memmap(args.dstore_mmap + '/vals.npy', dtype=np.int, mode='r', shape=(args.dstore_size, 1))
 
-    if use_cuda:
-        torch.cuda.set_device(args.device_id)
+print('done.')
 
-    if override_args is not None:
-        overrides = vars(override_args)
-        overrides.update(eval(getattr(override_args, "model_overrides", "{}")))
-    else:
-        overrides = None
+if not os.path.exists(args.faiss_index + ".trained"):
+    # Initialize faiss index
+    quantizer = faiss.IndexFlatL2(args.dimension)
+    index = faiss.IndexIVFPQ(quantizer, args.dimension,
+                             args.ncentroids, args.code_size, 8)
 
-    logger.info("loading model(s) from {}".format(args.path))
-    models, model_args, task = checkpoint_utils.load_model_ensemble_and_task(
-        [args.path],
-        arg_overrides=overrides,
-        suffix=getattr(args, "checkpoint_suffix", ""),
-    )
-    model = models[0]
+    index.nprobe = args.probe
 
-    # Move models to GPU
-    for model in models:
-        if use_fp16:
-            model.half()
-        if use_cuda:
-            model.cuda()
+    # TODO, we may remove useFloat16 when the GPU satisfy the condition
+    print('Start put index to gpu')
+    co = faiss.GpuClonerOptions()
+    co.useFloat16 = True
+    gpu_index = faiss.index_cpu_to_gpu(res, 0, index, co)
 
-    if args.save_plain_text:
-        batch_src_tokens = []
-        batch_target = []
+    print('Training Index')
+    np.random.seed(args.seed)
+    random_sample = np.random.choice(np.arange(vals.shape[0]), size=[min(1000000, vals.shape[0])], replace=False)
+    start = time.time()
+    # Faiss does not handle adding keys in fp16 as of writing this.
+    # gpu_index.train(keys[random_sample].astype(np.float32))
+    print(random_sample[:10])
+    print(keys[random_sample][:10])
+    gpu_index.train(keys[random_sample].astype(np.float32))
+    print('Training took {} s'.format(time.time() - start))
 
-    import numpy as np
-    print('Saving fp16')
-    dstore_keys = np.memmap(args.dstore_mmap + '/keys.npy', dtype=np.float16, mode='w+',
-                            shape=(args.dstore_size, args.decoder_embed_dim))
-    dstore_vals = np.memmap(args.dstore_mmap + '/vals.npy', dtype=np.int, mode='w+',
-                            shape=(args.dstore_size, 1))
+    print('Writing index after training')
+    start = time.time()
+    faiss.write_index(faiss.index_gpu_to_cpu(gpu_index), args.faiss_index + ".trained")
+    print('Writing index took {} s'.format(time.time() - start))
 
-    dstore_idx = 0
-    # --- end
-    data_idx = 1
-    for subset in args.valid_subset.split(","):
-        try:
-            task.args.required_seq_len_multiple = 1
-            task.args.load_alignments = False
-            task.load_dataset(subset, combine=False, epoch=data_idx)
-            data_idx = data_idx + 1
-            dataset = task.dataset(subset)
-        except KeyError:
-            raise Exception("Cannot find dataset: " + subset)
+print('Adding Keys')
+index = faiss.read_index(args.faiss_index + ".trained")
+co = faiss.GpuClonerOptions()
+co.useFloat16 = True
+gpu_index = faiss.index_cpu_to_gpu(res, 0, index, co)
+start = args.starting_point
+start_time = time.time()
+while start < args.dstore_size:
+    end = min(args.dstore_size, start + args.num_keys_to_add_at_a_time)
+    to_add = keys[start:end].copy()
+    gpu_index.add_with_ids(to_add.astype(np.float32), np.arange(start, end))
+    start += args.num_keys_to_add_at_a_time
 
-        # Initialize data iterator
-        itr = task.get_batch_iterator(
-            dataset=dataset,
-            max_tokens=args.max_tokens,
-            max_sentences=args.batch_size,
-            max_positions=utils.resolve_max_positions(
-                task.max_positions(),
-                *[m.max_positions() for m in models],
-            ),
-            ignore_invalid_inputs=args.skip_invalid_size_inputs_valid_test,
-            required_batch_size_multiple=args.required_batch_size_multiple,
-            seed=args.seed,
-            num_shards=args.distributed_world_size,
-            shard_id=args.distributed_rank,
-            num_workers=args.num_workers,
-            data_buffer_size=args.data_buffer_size,
-        ).next_epoch_itr(False)
-        progress = progress_bar.progress_bar(
-            itr,
-            log_format=args.log_format,
-            log_interval=args.log_interval,
-            prefix=f"valid on '{subset}' subset",
-            default_log_format=("tqdm" if not args.no_progress_bar else "simple"),
-        )
+    if (start % 1000000) == 0:
+        print('Added %d tokens so far' % start)
+        print('Writing Index', start)
+        faiss.write_index(faiss.index_gpu_to_cpu(gpu_index), args.faiss_index)
 
-        with torch.no_grad():
-            model.eval()
-            for i, sample in enumerate(progress):
-                sample = utils.move_to_cuda(sample) if use_cuda else sample
-
-                features = task.forward_and_get_hidden_state_step(sample, model)  # [B, T, H]
-                target = sample['target']  # [B, T]
-
-                # get useful parameters
-                batch_size = target.size(0)
-                seq_len = target.size(1)
-                pad_idx = task.target_dictionary.pad()
-                target_mask = target.ne(pad_idx)  # [B, T]
-
-                # remove the pad tokens and related hidden states
-                target = target.view(batch_size * seq_len)
-                target_mask = target_mask.view(batch_size * seq_len)
-
-                non_pad_index = target_mask.nonzero().squeeze(-1)  # [n_count]
-                target = target.index_select(dim=0, index=non_pad_index)  # [n_count]
-
-                features = features.contiguous().view(batch_size * seq_len, -1)
-                features = features.index_select(dim=0, index=non_pad_index)  # [n_count, feature size]
-
-                current_batch_count = target.size(0)
-                if dstore_idx + current_batch_count > args.dstore_size:
-                    reduce_size = args.dstore_size - dstore_idx
-                    features = features[:reduce_size]
-                    target = target[:reduce_size]
-                    if args.save_plain_text:
-                        src_tokens = src_tokens[:reduce_size, :]
-                else:
-                    reduce_size = current_batch_count
-
-                dstore_keys[dstore_idx:reduce_size + dstore_idx] = features.detach().cpu().numpy().astype(
-                    np.float16)
-                dstore_vals[dstore_idx:reduce_size + dstore_idx] = target.unsqueeze(-1).cpu().numpy().astype(np.int)
-                dstore_idx += reduce_size
-
-                print(dstore_idx)
-                if dstore_idx >= args.dstore_size:
-                    print('much more than dstore size break')
-                    break
-
-def cli_main():
-    parser = options.get_save_datastore_parser()
-    args = options.parse_args_and_arch(parser)
-
-    # only override args that are explicitly given on the command line
-    override_parser = options.get_save_datastore_parser()
-    override_args = options.parse_args_and_arch(override_parser, suppress_defaults=True)
-
-    distributed_utils.call_main(args, main, override_args=override_args)
-
-
-if __name__ == "__main__":
-    cli_main()
+print("Adding total %d keys" % end)
+print('Adding took {} s'.format(time.time() - start_time))
+print('Writing Index')
+start = time.time()
+faiss.write_index(faiss.index_gpu_to_cpu(gpu_index), args.faiss_index)
+print('Writing index took {} s'.format(time.time() - start))

@@ -1,28 +1,19 @@
 export CUDA_VISIBLE_DEVICES=$1
-DISTILL=/home/data_ti5_c/wangdq/data/fairseq/iwslt14/ende
+#DISTILL=/home/wangdq/data/iwslt/data-bin/
+DISTILL=/home/wangdq/data/wmt/data-bin/
 
-fairseq-train $DISTILL \
-  --ddp-backend=no_c10d \
-  --save-dir ~/save/iwslt14_ende/transformer_noshare/ \
+fairseq-generate $DISTILL \
+  --path ~/save/iwslt14_ende/$4/checkpoint_$5.pt \
+  --batch-size 128 \
+  --beam 5 \
+  --remove-bpe \
+  --results-path ~/$2 \
+  --gen-subset $3 \
   --task translation \
-  --arch transformer_iwslt_de_en \
-  --share-decoder-input-output-embed \
-  --optimizer adam --adam-betas '(0.9, 0.98)' \
-  --clip-norm 0.0 --lr 5e-4 --lr-scheduler inverse_sqrt --warmup-updates 4000 \
-  --dropout 0.3 --weight-decay 0.0001 \
-  --criterion label_smoothed_cross_entropy \
-  --label-smoothing 0.1 --max-tokens 4096 \
-  --eval-bleu \
-  --eval-bleu-args '{"beam": 5, "max_len_a": 1.2, "max_len_b": 10}' \
-  --eval-bleu-detok moses \
-  --eval-bleu-detok moses \
-  --eval-bleu-remove-bpe \
-  --best-checkpoint-metric bleu --maximize-best-checkpoint-metric \
-  --no-progress-bar --log-format simple --log-interval 500 \
-  --keep-interval-updates 5 \
-  --keep-best-checkpoints 5 \
-  --no-epoch-checkpoints \
-  --save-interval-updates 500 \
-  --max-update 100000 \
+  --seed 1234 \
   -s en -t de \
-  --num-workers 4
+  --max-len-a 1.2 \
+  --max-len-b 10 \
+  --model-overrides "{'valid_subset': '$3'}"
+
+tail -1 ~/$2/generate-$3.txt

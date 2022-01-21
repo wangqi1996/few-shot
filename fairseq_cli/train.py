@@ -7,15 +7,14 @@
 Train a new model on one or across multiple GPUs.
 """
 
-import argparse
 import logging
 import math
 import os
-import random
 import sys
 
 import numpy as np
 import torch
+
 from fairseq import (
     checkpoint_utils,
     distributed_utils,
@@ -28,7 +27,6 @@ from fairseq.data import iterators
 from fairseq.logging import meters, metrics, progress_bar
 from fairseq.model_parallel.megatron_trainer import MegatronTrainer
 from fairseq.trainer import Trainer
-
 
 logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
@@ -55,7 +53,7 @@ def main(args):
         checkpoint_utils.verify_checkpoint_directory(args.save_dir)
 
     # Print args
-    logger.info(args)
+    # logger.info(args)
 
     # Setup task, e.g., translation, language modeling, etc.
     task = tasks.setup_task(args)
@@ -67,18 +65,18 @@ def main(args):
     # Build model and criterion
     model = task.build_model(args)
     criterion = task.build_criterion(args)
-    logger.info(model)
-    logger.info("task: {} ({})".format(args.task, task.__class__.__name__))
-    logger.info("model: {} ({})".format(args.arch, model.__class__.__name__))
-    logger.info(
-        "criterion: {} ({})".format(args.criterion, criterion.__class__.__name__)
-    )
-    logger.info(
-        "num. model params: {} (num. trained: {})".format(
-            sum(p.numel() for p in model.parameters()),
-            sum(p.numel() for p in model.parameters() if p.requires_grad),
-        )
-    )
+    # logger.info(model)
+    # logger.info("task: {} ({})".format(args.task, task.__class__.__name__))
+    # logger.info("model: {} ({})".format(args.arch, model.__class__.__name__))
+    # logger.info(
+    #     "criterion: {} ({})".format(args.criterion, criterion.__class__.__name__)
+    # )
+    # logger.info(
+    #     "num. model params: {} (num. trained: {})".format(
+    #         sum(p.numel() for p in model.parameters()),
+    #         sum(p.numel() for p in model.parameters() if p.requires_grad),
+    #     )
+    # )
 
     # (optionally) Configure quantization
     if args.quantization_config_path is not None:

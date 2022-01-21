@@ -12,13 +12,13 @@ from typing import Dict, List, Optional, Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch import Tensor
+
 from fairseq import utils
 from fairseq.checkpoint_utils import prune_state_dict
 from fairseq.data import Dictionary
 from fairseq.dataclass.utils import gen_parser_from_dataclass
 from fairseq.models import FairseqDecoder, FairseqEncoder
-from torch import Tensor
-
 
 logger = logging.getLogger(__name__)
 
@@ -146,7 +146,8 @@ class BaseFairseqModel(nn.Module):
             kwargs["retain_dropout_modules"] = getattr(
                 args, "retain_dropout_modules", None
             )
-        self.make_generation_fast_(**kwargs)
+        if not getattr(args, "online_training", False):
+            self.make_generation_fast_(**kwargs)
 
     def make_generation_fast_(self, **kwargs):
         """

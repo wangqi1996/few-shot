@@ -23,6 +23,7 @@ def collate(
     pad_to_length=None,
     pad_to_multiple=1,
 ):
+
     if len(samples) == 0:
         return {}
 

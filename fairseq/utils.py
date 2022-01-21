@@ -10,20 +10,19 @@ import importlib
 import logging
 import os
 import sys
-import tempfile
 import warnings
 from itertools import accumulate
 from typing import Callable, Dict, List, Optional
 
 import torch
 import torch.nn.functional as F
+from torch import Tensor
+
 from fairseq.data import iterators
 from fairseq.file_io import PathManager
 from fairseq.logging.meters import safe_round
 from fairseq.modules import gelu, gelu_accurate
 from fairseq.modules.multihead_attention import MultiheadAttention
-from torch import Tensor
-
 
 try:
     from amp_C import multi_tensor_l2norm
@@ -32,9 +31,7 @@ try:
 except ImportError:
     multi_tensor_l2norm_available = False
 
-
 logger = logging.getLogger(__name__)
-
 
 MANIFOLD_PATH_SEP = "|"
 
@@ -118,19 +115,19 @@ def move_to_cpu(sample):
 
 
 def get_incremental_state(
-    module: MultiheadAttention,
-    incremental_state: Optional[Dict[str, Dict[str, Optional[Tensor]]]],
-    key: str,
+        module: MultiheadAttention,
+        incremental_state: Optional[Dict[str, Dict[str, Optional[Tensor]]]],
+        key: str,
 ) -> Optional[Dict[str, Optional[Tensor]]]:
     """Helper for getting incremental state for an nn.Module."""
     return module.get_incremental_state(incremental_state, key)
 
 
 def set_incremental_state(
-    module: MultiheadAttention,
-    incremental_state: Optional[Dict[str, Dict[str, Optional[Tensor]]]],
-    key: str,
-    value: Dict[str, Optional[Tensor]],
+        module: MultiheadAttention,
+        incremental_state: Optional[Dict[str, Dict[str, Optional[Tensor]]]],
+        key: str,
+        value: Dict[str, Optional[Tensor]],
 ) -> Optional[Dict[str, Dict[str, Optional[Tensor]]]]:
     """Helper for setting incremental state for an nn.Module."""
     if incremental_state is not None:
@@ -210,13 +207,13 @@ def replace_unk(hypo_str, src_str, alignment, align_dict, unk):
 
 
 def post_process_prediction(
-    hypo_tokens,
-    src_str,
-    alignment,
-    align_dict,
-    tgt_dict,
-    remove_bpe=None,
-    extra_symbols_to_ignore=None,
+        hypo_tokens,
+        src_str,
+        alignment,
+        align_dict,
+        tgt_dict,
+        remove_bpe=None,
+        extra_symbols_to_ignore=None,
 ):
     hypo_str = tgt_dict.string(
         hypo_tokens, remove_bpe, extra_symbols_to_ignore=extra_symbols_to_ignore
@@ -259,7 +256,7 @@ def buffered_arange(max):
 
 
 def convert_padding_direction(
-    src_tokens, padding_idx, right_to_left: bool = False, left_to_right: bool = False
+        src_tokens, padding_idx, right_to_left: bool = False, left_to_right: bool = False
 ):
     assert right_to_left ^ left_to_right
     pad_mask = src_tokens.eq(padding_idx)
@@ -693,6 +690,8 @@ def eval_str_dict(x, type=dict):
 
 
 def eval_bool(x, default=False):
+    if x is True or x is False:
+        return x
     if x is None:
         return default
     try:

@@ -1,42 +1,23 @@
-
 export CUDA_VISIBLE_DEVICES=$1
-#export TOKENIZERS_PARALLELISM=false
-#export MKL_THREADING_LAYER=GUN
 
+#MODEL_PATH=/home/data_ti6_d/wangdq/wmt17_en2zh/pretrain-all.pt
+#DATASET=/home/wangdq/cwmt/temp_select/data-bin/
 
-#DATASET=/home/data_ti5_c/wangdq/data/few_shot/pretrain/data-bin/
-
-#DATASET=/home/data_ti5_c/wangdq/data/few_shot/few-shot/data-bin/
-DATASET=/home/data_ti5_c/wangdq/data/few_shot/shot/$3/data-bin/
+MODEL_PATH=/home/wangdq/save/wmt17_en2zh/pretrain/checkpoint_best.pt
+DATASET=/home/wangdq/cwmt/select_10/oracle-self/data-bin/
+result_path=$2
+gen_subset=$3
 
 fairseq-generate $DATASET \
-    --path ~/save/wmt17_en2zh/tune-$3/checkpoint_best.pt \
-    --beam 4 --lenpen 0.6 --remove-bpe \
-    -s en -t zh \
-   --scoring sacrebleu  \
-   --sacrebleu-tokenizer zh \
-    --results-path ~/$2/ \
-    --tokenizer moses
+  --path $MODEL_PATH --gen-subset $gen_subset \
+  --beam 4 --lenpen 0.6 --remove-bpe \
+  -s en -t zh \
+  --results-path ~/$result_path/ \
+#  --sacrebleu-tokenizer zh \
+#  --tokenizer moses \
+#  --scoring sacrebleu \
 
-tail -1 ~/$2/generate-test.txt
-grep ^D ~/$2/generate-test.txt | cut -f3- > ~/$2/hypo
-grep ^T ~/$2/generate-test.txt | cut -f2- > ~/$2/ref
+grep ^D ~/$result_path/generate-$gen_subset.txt | cut -f3- >~/$result_path/hypo
+grep ^T ~/$result_path/generate-$gen_subset.txt | cut -f2- >~/$result_path/ref
 
-cat ~/$2/hypo | sacrebleu ~/$2/ref  --tokenize zh
-
-python scripts/average_checkpoints.py --inputs ~/save/wmt17_en2zh/tune-$3/checkpoint.best_ --output ~/save/wmt17_en2zh/tune-$3/checkpoint_ave_best.pt
-
-fairseq-generate $DATASET  \
-    --path ~/save/wmt17_en2zh/tune-$3/checkpoint_ave_best.pt \
-    --beam 4 --lenpen 0.6 --remove-bpe \
-    -s en -t zh \
-   --scoring sacrebleu  \
-   --sacrebleu-tokenizer zh \
-    --results-path ~/test/ \
-    --tokenizer moses
-
-tail -1 ~/$2/generate-test.txt
-grep ^D ~/$2/generate-test.txt | cut -f3- > ~/$2/hypo
-grep ^T ~/$2/generate-test.txt | cut -f2- > ~/$2/ref
-
-cat ~/$2/hypo | sacrebleu ~/$2/ref  --tokenize zh
+cat ~/$result_path/hypo | sacrebleu ~/$result_path/ref --tokenize zh

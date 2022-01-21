@@ -1,14 +1,21 @@
 import os.path
 import random
 
+from scripts.token.read_freq_batch import read_tokens
 
-def select_sentences(token, src_filename, tgt_filename, hint='', copy_num=1, random_select=0):
+
+def select_sentences(select_tokens, src_filename, tgt_filename, hint='', copy_num=1, random_select=0):
     filter_src, filter_tgt = [], []
     non_select_src, non_select_tgt = [], []
     with open(src_filename) as f_src, open(tgt_filename) as f_tgt:
         for src, tgt in zip(f_src, f_tgt):
             tokens = src.strip().split(' ')
-            if token in tokens:
+            select = False
+            for token in tokens:
+                if token in select_tokens:
+                    select = True
+                    break
+            if select:
                 for _ in range(copy_num):
                     filter_src.append(src)
                     filter_tgt.append(tgt)
@@ -42,10 +49,24 @@ def select_sentences(token, src_filename, tgt_filename, hint='', copy_num=1, ran
 if __name__ == '__main__':
     import sys
 
-    token = sys.argv[1]
+    token_filename = sys.argv[1]
+    tokens = read_tokens(token_filename)
+
     src_filename = sys.argv[2]
     tgt_filename = sys.argv[3]
     hint = sys.argv[4]
     copy_num = int(sys.argv[5])
     random_select = int(sys.argv[6])
-    select_sentences(token, src_filename, tgt_filename, hint, copy_num, random_select)
+
+    # dirname = "/home/wangdq/cwmt/select_10/"
+    #
+    # tokens = read_tokens(dirname + "26982" + "/token.txt")
+    # tokens.update(read_tokens(dirname + "19555" + "/token.txt"))
+    # tokens.update(read_tokens(dirname + "20182" + "/token.txt"))
+    # tokens.update(read_tokens(dirname + "19622" + "/token.txt"))
+    # src_filename = "/home/wangdq/cwmt/select_10/test.en"
+    # tgt_filename = "/home/wangdq/cwmt/select_10/test.zh"
+    # copy_num = 1
+    # random_select = 0
+    # hint = ""
+    select_sentences(tokens, src_filename, tgt_filename, hint, copy_num, random_select)

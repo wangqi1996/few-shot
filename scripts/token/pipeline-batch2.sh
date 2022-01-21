@@ -120,6 +120,7 @@ bash $code_dirname/scripts/token/inference.sh $cuda $result_path $tune_self_mode
 bash $code_dirname/scripts/token/inference.sh $cuda $result_path $tune_self_model $oracle_self_data test
 
 # 测试oracle性能
+cp ../select-self/ref.zh .
 /home/data_ti5_c/wangdq/code/fastBPE/fast applybpe train.bpe.zh ref.zh /home/wangdq/cwmt/codes.zh
 
 cat $data_dirname/${random_seed}/tune/train.bpe.zh >>train.bpe.zh
